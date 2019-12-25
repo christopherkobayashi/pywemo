@@ -5,23 +5,14 @@
 """
 <plugin key="WeMoCrockpot" name="Belkin WeMo Crockpot" author="Christopher KOBAYASHI" version="1.0.0" wikilink="http://www.domoticz.com/wiki/plugins/plugin.html" externallink="https://www.google.com/">
     <description>
-        <h2>Belkin WeMo Crockpot</h2><br/>
-        Overview...
-        <h3>Features</h3>
-        <ul style="list-style-type:square">
-            <li>Feature one...</li>
-            <li>Feature two...</li>
-        </ul>
+        <h2>Belkin WeMo Crockpot</h2>
         <h3>Devices</h3>
         <ul style="list-style-type:square">
-            <li>Crockpot - cooks food slowly</li>
+            <li>Crockpot</li>
         </ul>
-        <h3>Configuration</h3>
-        Configuration options...
     </description>
     <params>
         <param field="Address" label="IP Address" width="200px" required="true"/>
-        </param>
         <param field="Mode6" label="Debug" width="75px">
             <options>
                 <option label="True" value="Debug"/>
@@ -35,48 +26,42 @@
 import pywemo
 import socket
 import Domoticz
-from enum import Enum
 
-# >>> wemo_device.mode
-# 50
-# >>> wemo_device.set_state(51)
-# >>> wemo_device.set_state(52)
-MODE_NAMES = {
-    CrockPotMode.Off: "Off",
-    CrockPotMode.Warm: "Warm",
-    CrockPotMode.Low: "Low",
-    CrockPotMode.High: "High",
-}
-
-class BasePlugin:
+class WeMoCrockpotPlugin:
     enabled = False
+    alive = False
+
     def __init__(self):
-        self.alive = False
         self.interval = 6  # 6*10 seconds
         self.heartbeatcounter = 0
 
     def onStart(self):
         Domoticz.Log("onStart called")
         try:
-        	wemo_ip = socket.gethostbyname(Parameters["Address"])
-        	wemo_port = pywemo.ouimeaux_device.probe_wemo(wemo_ip)
-			wemo_url = 'http://%s:%i/setup.xml' % (wemo_ip, wemo_port)
-			self.wemo_device = pywemo.discovery.device_from_description(wemo_url, None)
-		except:
-			Domoticz.log("not available or unrecognized")
-			return
+            Domoticz.Log(Parameters["Address"])
+       	    wemo_ip = socket.gethostbyname(Parameters["Address"])
+       	    Domoticz.Log(str(wemo_ip))
+            wemo_port = pywemo.ouimeaux_device.probe_wemo(wemo_ip)
+            wemo_url = 'http://%s:%i/setup.xml' % (wemo_ip, wemo_port)
+            self.wemo_device = pywemo.discovery.device_from_description(wemo_url, None)
+        except:
+            Domoticz.Log("not available or unrecognized")
+            return
 
-		self.alive = True
-		if (len(Devices) == 0):
-			SelectorOptions =	{	"LevelActions": "|||",
-									"LevelNames": "Off|Warm|Low|High"
-									"LevelOffHidden": "false",
-									"SelectorStyle": "1"
-								}
-			Domoticz.Device(Name="Cooking Mode", Unit=0, TypeName="Selector Switch", Image=7, Options=SelectorOptions, Used=1).Create()
-
-		current_mode = self.wemo_device.mode
-		Devices[0].Update(nValue=current_mode, sValue=str(MODE_NAMES.get(current_mode)))
+        self.alive = True
+        if (len(Devices) == 0):
+            SelectorOptions = { "LevelActions": "|||",
+                                "LevelNames": "Off|Warm|Low|High",
+                                "LevelOffHidden": "true",
+                                "SelectorStyle": "1"
+                              }
+            Domoticz.Device(Name="Cooking Mode", Unit=1, TypeName="Selector Switch", Image=7, Options=SelectorOptions, Used=1).Create()
+            Domoticz.Log("created")
+        Domoticz.Log("registered")
+        current_state = self.wemo_device.get_state()
+        current_mode = self.wemo_device.mode_string
+        Domoticz.Log(str(current_state) + " " + current_mode)
+        Devices[1].Update(nValue=current_state, sValue=current_mode)
 
 
     def onStop(self):
@@ -91,27 +76,25 @@ class BasePlugin:
     def onCommand(self, Unit, Command, Level, Hue):
         if self.alive:
             Domoticz.Log("onCommand called for Unit " +
-                     str(unit) + ": Parameter '" + str(command) + "', Level: " + str(level))
+                     str(Unit) + ": Parameter '" + str(Command) + "', Level: " + str(Level))
 
-#            if command.lower() == 'on':
-#                self.bulb.turn_on()
-#                okay = self.bulb.is_on
-#            elif command.lower() == 'off':
-#                self.bulb.turn_off()
-#                okay = self.bulb.is_off
-#            elif command.lower() == 'set level':
-#                if self.bulb.is_off:
-#                    self.bulb.turn_on()
-#                self.bulb.set_brightness(level)
-#                okay = self.bulb.is_on
-#            else:
-#                okay = False
-#
-#            if okay is True:
-#           Devices[unit].Update(nValue = self.bulb.is_on, sValue=str(level))
-#           # Reset counter so we trigger emeter poll next heartbeat
-#            self.heartbeatcounter = 0
-        return
+            if Command.lower() == 'set level':
+                if Level == 0:
+                    vstate = 0
+                elif Level == 10:
+                    vstate = 50
+                elif Level == 20:
+                    vstate = 51
+                elif Level == 30:
+                    vstate = 52
+            elif Command.lower() == 'off':
+                vstate = 0
+            else:
+                return
+
+            self.wemo_device.set_mode(vstate, 0)
+            Devices[Unit].Update(nValue = Level, sValue=self.wemo_device.mode_string)
+            self.heartbeatcounter = 0
 
     def onNotification(self, Name, Subject, Text, Status, Priority, Sound, ImageFile):
         Domoticz.Log("Notification: " + Name + "," + Subject + "," + Text + "," + Status + "," + str(Priority) + "," + Sound + "," + ImageFile)
@@ -121,9 +104,17 @@ class BasePlugin:
 
     def onHeartbeat(self):
         Domoticz.Log("onHeartbeat called")
+        if self.alive:
+            if (self.heartbeatcounter % self.interval == 0):
+                current_state = self.wemo_device.get_state()
+                current_mode = self.wemo_device.mode_string
+                Domoticz.Log(str(current_state) + " " + current_mode)
+#                Devices[1].Update(nValue=Level, sValue=current_mode)
+        else:
+            onStart()
 
 global _plugin
-_plugin = BasePlugin()
+_plugin = WeMoCrockpotPlugin()
 
 def onStart():
     global _plugin
