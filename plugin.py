@@ -31,6 +31,13 @@ class WeMoCrockpotPlugin:
     enabled = False
     alive = False
 
+    state_dict = {
+                    0: "0",
+                    50: "10",
+                    51: "20",
+                    52: "30"
+        }
+
     def __init__(self):
         self.interval = 6  # 6*10 seconds
         self.heartbeatcounter = 0
@@ -49,20 +56,22 @@ class WeMoCrockpotPlugin:
             return
 
         self.alive = True
-        if (len(Devices) == 0):
-            SelectorOptions = { "LevelActions": "|||",
-                                "LevelNames": "Off|Warm|Low|High",
-                                "LevelOffHidden": "true",
-                                "SelectorStyle": "1"
-                              }
-            Domoticz.Device(Name="Cooking Mode", Unit=1, TypeName="Selector Switch", Image=7, Options=SelectorOptions, Used=1).Create()
-            Domoticz.Log("created")
-        Domoticz.Log("registered")
         current_state = self.wemo_device.get_state()
-        current_mode = self.wemo_device.mode_string
-        Domoticz.Log(str(current_state) + " " + current_mode)
-        Devices[1].Update(nValue=current_state, sValue=current_mode)
 
+        SelectorOptions =   {   "LevelActions": "|||",
+                                "LevelNames": "Off|Warm|Low|High",
+                                "LevelOffHidden": "false",
+                                "SelectorStyle": "0"
+                            }
+        if (len(Devices) == 0):
+            Domoticz.Device(Name="Slow Cooker", Unit=1, TypeName="Selector Switch", Image=7, Options=SelectorOptions, Used=1).Create()
+            Domoticz.Log("created")
+            Devices[1].Update(nValue=2, sValue=self.state_dict[self.wemo_device.mode])
+        else:
+            Devices[1].Update(nValue=2, sValue=self.state_dict[self.wemo_device.mode],
+                TypeName="Selector Switch", Options=SelectorOptions, Used=1)
+            Domoticz.Log("updated")
+        Domoticz.Log(str(self.wemo_device.mode))
 
     def onStop(self):
         Domoticz.Log("onStop called")
@@ -78,22 +87,15 @@ class WeMoCrockpotPlugin:
             Domoticz.Log("onCommand called for Unit " +
                      str(Unit) + ": Parameter '" + str(Command) + "', Level: " + str(Level))
 
-            if Command.lower() == 'set level':
-                if Level == 0:
-                    vstate = 0
-                elif Level == 10:
-                    vstate = 50
-                elif Level == 20:
-                    vstate = 51
-                elif Level == 30:
-                    vstate = 52
-            elif Command.lower() == 'off':
-                vstate = 0
-            else:
-                return
+            if Command.lower() == 'off':
+                Level = 0
 
+            try:
+                vstate = list(self.state_dict.keys())[list(self.state_dict.values()).index(str(Level))]
+            except:
+                return
             self.wemo_device.set_mode(vstate, 0)
-            Devices[Unit].Update(nValue = Level, sValue=self.wemo_device.mode_string)
+            Devices[Unit].Update(nValue = 2, sValue=str(Level))
             self.heartbeatcounter = 0
 
     def onNotification(self, Name, Subject, Text, Status, Priority, Sound, ImageFile):
@@ -106,10 +108,7 @@ class WeMoCrockpotPlugin:
         Domoticz.Log("onHeartbeat called")
         if self.alive:
             if (self.heartbeatcounter % self.interval == 0):
-                current_state = self.wemo_device.get_state()
-                current_mode = self.wemo_device.mode_string
-                Domoticz.Log(str(current_state) + " " + current_mode)
-#                Devices[1].Update(nValue=Level, sValue=current_mode)
+                Devices[1].Update(nValue=2, sValue=self.state_dict[self.wemo_device.mode])
         else:
             onStart()
 
